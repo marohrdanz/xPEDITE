@@ -60,9 +60,17 @@ jobs:
         with:
           working-directory: scripts
 
+      # testthat is only referenced in other packages' Suggests, not pinned as a
+      # package in renv.lock, so renv::restore() does not install it. Add it to
+      # the project library so the test suite can run.
+      - name: Install testthat
+        run: Rscript -e 'renv::install("testthat")'
+
+      # Run from scripts/ (not scripts/tests) so scripts/.Rprofile is sourced and
+      # the renv library is activated; then step into tests/ where the test files
+      # expect the working directory to be (they source ../*.R and read testfiles/).
       - name: Run testthat suite
-        working-directory: scripts/tests
-        run: Rscript -e "testthat::test_dir('.', stop_on_failure = TRUE)"
+        run: Rscript -e 'setwd("tests"); testthat::test_dir(".", stop_on_failure = TRUE)'
 
       # The pipeline reads the metabolite name dictionary from a fixed path
       # (/workspace/...), which is where it lives inside the container image.
