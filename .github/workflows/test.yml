@@ -48,6 +48,14 @@ jobs:
       - name: Configure Java for rJava
         run: sudo R CMD javareconf
 
+      # scripts/.Rprofile hardcodes the renv cache to /app/scripts/.cache (its
+      # location inside the container image) via Sys.setenv(), which overrides
+      # any env override. Recreate it as a writable directory so renv activation
+      # succeeds on the runner. (Consequence: the package cache lives here rather
+      # than under RENV_PATHS_ROOT, so it is rebuilt each run rather than cached.)
+      - name: Prepare renv cache directory
+        run: sudo mkdir -p /app/scripts/.cache && sudo chmod -R 777 /app/scripts/.cache
+
       - uses: r-lib/actions/setup-renv@v2
         with:
           working-directory: scripts
