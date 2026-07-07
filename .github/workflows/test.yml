@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   r-pipeline-tests:
-    name: R analysis pipeline tests
+    name: R pipeline unit + report smoke tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -55,6 +55,18 @@ jobs:
       - name: Run testthat suite
         working-directory: scripts/tests
         run: Rscript -e "testthat::test_dir('.', stop_on_failure = TRUE)"
+
+      # The pipeline reads the metabolite name dictionary from a fixed path
+      # (/workspace/...), which is where it lives inside the container image.
+      # Recreate that layout so check_naming_dictionary() can find it.
+      - name: Set up metabolite name dictionary
+        run: |
+          sudo mkdir -p /workspace/metabolite_name_dictionary
+          sudo cp ../module-sources/metabolite_name_dictionary/Metabolite_name_reference.tsv \
+            /workspace/metabolite_name_dictionary/
+
+      - name: Run report-generation smoke test
+        run: Rscript tests/smoke_report_pipeline.R
 
   backend-sanity:
     name: Backend (Node) sanity checks
