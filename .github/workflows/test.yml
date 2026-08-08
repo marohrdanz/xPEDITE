@@ -1,0 +1,106 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  r-pipeline-tests:
+    name: R pipeline unit + report smoke tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+      - uses: actions/checkout@v4
+
+      # System libraries needed to build/run the R packages in scripts/renv.lock
+      # (mirrors the apt-get list used to build the R environment in backend/Dockerfile)
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            default-jdk \
+            gdal-bin \
+            libcurl4-openssl-dev \
+            libfontconfig1-dev \
+            libfribidi-dev \
+            libgdal-dev \
+            libharfbuzz-dev \
+            libmagick++-dev \
+            libsodium-dev \
+            libssl-dev \
+            libudunits2-dev \
+            libv8-dev \
+            libxml2-dev \
+            libxslt-dev
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.2.2'
+          use-public-rspm: true
+
+      - name: Configure Java for rJava
+        run: sudo R CMD javareconf
+
+      # scripts/.Rprofile hardcodes the renv cache to /app/scripts/.cache (its
+      # location inside the container image) via Sys.setenv(), which overrides
+      # any env override. Recreate it as a writable directory so renv activation
+      # succeeds on the runner. (Consequence: the package cache lives here rather
+      # than under RENV_PATHS_ROOT, so it is rebuilt each run rather than cached.)
+      - name: Prepare renv cache directory
+        run: sudo mkdir -p /app/scripts/.cache && sudo chmod -R 777 /app/scripts/.cache
+
+      - uses: r-lib/actions/setup-renv@v2
+        with:
+          working-directory: scripts
+
+      # testthat is only referenced in other packages' Suggests, not pinned as a
+      # package in renv.lock, so renv::restore() does not install it. Add it to
+      # the project library so the test suite can run.
+      - name: Install testthat
+        run: Rscript -e 'renv::install("testthat")'
+
+      # Run from scripts/ (not scripts/tests) so scripts/.Rprofile is sourced and
+      # the renv library is activated; then step into tests/ where the test files
+      # expect the working directory to be (they source ../*.R and read testfiles/).
+      - name: Run testthat suite
+        run: Rscript -e 'setwd("tests"); testthat::test_dir(".", stop_on_failure = TRUE)'
+
+      # The pipeline reads the metabolite name dictionary from a fixed path
+      # (/workspace/...), which is where it lives inside the container image.
+      # Recreate that layout so check_naming_dictionary() can find it.
+      - name: Set up metabolite name dictionary
+        run: |
+          sudo mkdir -p /workspace/metabolite_name_dictionary
+          sudo cp ../module-sources/metabolite_name_dictionary/Metabolite_name_reference.tsv \
+            /workspace/metabolite_name_dictionary/
+
+      - name: Run report-generation smoke test
+        run: Rscript tests/smoke_report_pipeline.R
+
+  backend-sanity:
+    name: Backend (Node) sanity checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax-check all backend source files
+        run: find . -name "*.js" -not -path "./node_modules/*" -print0 | xargs -0 -n1 node --check
